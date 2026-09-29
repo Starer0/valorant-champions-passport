@@ -19,6 +19,7 @@
 
 - [ai-guide.zh_CN.md](ai-guide.zh_CN.md)：AI 开发工作流（面向 AI 编程助手：上下文建立、需求拆解、BSP 边界、验收交付格式）。
 - [核心 AI 技能](../../skills/README.zh_CN.md)：开发、环境准备、构建、真机测试及诊断，包含安装和使用示例。
+- [上海冠军赛卡片](champions-card.zh_CN.md)：此衍生应用的数据源、按键、Wi-Fi 配网和真机验收项。
 
 ## 工程约定（engineering）
 

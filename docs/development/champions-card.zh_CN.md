@@ -1,0 +1,48 @@
+<p align="right"><strong>简体中文</strong> · <a href="champions-card.md">English</a></p>
+
+# 上海冠军赛卡片
+
+这个衍生应用使用适配 Passport 240 × 320 屏幕的黑金三页界面，取代原有硬件测试菜单。三页分别展示下一场、今日最多两场比赛、赛事阶段。进行中的比赛优先出现在首页；主比分显示当前地图的回合比分，每队下方的填充圆点表示已赢地图数。BO3 每队两个点，BO5 每队三个点。时间按中国标准时间（UTC+8）显示。
+
+比赛主卡在队伍缩写旁显示双方队标；今日赛程使用小队标。顶栏和赛事阶段页采用 2026 冠军赛标识。16 支参赛队的队标以 RGB565A8 格式预置在 Flash，显示时无需另行下载图片；遇到未知或未来队伍则显示缩写。素材来自[官方上海冠军赛参赛队页面](https://valorantesports.com/en-US/tournament/115576361459045501/overview)及[官方赛事视觉](https://valorantesports.com/en-US/news/champions-shanghai-everything-you-need-to-know)，商标归各权利人所有。此个人赛程屏并非 Riot 或战队官方产品。安装 Pillow 后可用 `python tools/generate_champions_assets.py` 重新生成打包资源。
+
+## 数据与按键
+
+- 赛程：VLR.gg 的[赛事日历订阅](https://www.vlr.gg/event/ical/2766)，提供 UTC 开赛时间和队伍。
+- 比赛状态及系列赛比分：VLR.gg 的[赛事赛程页](https://www.vlr.gg/event/matches/2766/valorant-champions-2026/)；当前地图回合比分及 BO3/BO5 赛制来自相应的公开[比赛详情页](https://www.vlr.gg/753444/)。这是非官方数据源，网页结构与更新时间可能变化。暂时无法读取回合比分时，主卡显示 `--:--` 和 `ROUNDS SYNCING`，不会编造比分；赛事赛程页失败时保留上一次完整卡片并显示 `DATA ERROR`，不会用不完整数据覆盖。
+- 可选备用源：VLR 赛事赛程页或比赛详情页请求失败时，请求 HenrikDev 的 [VLR 比赛详情 API](https://docs.henrikdev.xyz/api-reference/valorant/get-vlr-match-details-v2)。它同样基于 VLR 数据，不能保证比原站更新更快。用户通过设备本地配网页面保存或删除 API Key；密钥只存放在设备 NVS 中，不会写进固件。没有密钥时设备继续重试 VLR。真机已验证 HenrikDev 能返回一场已结束比赛的 2:0 大比分，但直播回合比分的新鲜度尚未验证。该场比赛中 VLR 详情页可读到地图回合比分，而 HenrikDev 返回结果没有回合分，因此目前仍以直连 VLR 为主源。
+- 刷新频率：赛程及系列赛状态通常每十分钟一次；距离下一场不足一小时则每两分钟一次；直播期间每 60 秒一次。地图回合比分单独刷新，上次请求完成后等待五秒再查。所有请求共用一个工作任务，因此赛程下载、网络耗时及数据源更新时间仍会延长实际显示间隔。两条刷新流程独立退避重试（15、30、60、120 秒），请求失败时保留旧数据；大比分变化时清除上一张地图的缓存回合分。短按确定键可立即触发两条刷新流程。
+- 上/下键：切换上一页或下一页。手动选择保持 20 秒，随后恢复自动轮播，首页停留最久。
+- 长按确定键：重新打开 Wi-Fi 配网页面。
+- 如需在不更换现有 Wi-Fi 的情况下设置备用源：长按确定键，连接屏幕显示的临时 `Passport-VCT-*` 热点，打开 `http://192.168.4.1`，选择 **Save API key**。保存后配网页面会关闭并继续使用原 Wi-Fi；同一页面也可删除密钥。
+
+固件不包含 Wi-Fi 密码。首次启动时，设备会显示临时 `Passport-VCT-*` 热点及随机密码。用手机连接该热点，打开 `http://192.168.4.1`，输入 2.4 GHz Wi-Fi 的名称和密码。设备获得 IP 地址后关闭配网页面。配网页面也提供清除已保存 Wi-Fi 的操作。断网后，最后一次成功获取的赛程仍会显示，并附带离线或过期提示。
+
+界面目前只使用 ASCII/拉丁字母标签及配置好的 Montserrat 字体，没有需要覆盖的中文字形。接受字号、对比度和截断情况之前，仍需在真实屏幕上逐页检查。
+
+## 构建与真机验收
+
+使用 ESP-IDF 5.5.3 和仓库验证脚本。经验证的合并固件从 Flash 偏移 `0x0` 写入；这可能重置 NVS 数据，包括 Wi-Fi 设置。未经设备所有者确认，不得刷机。真机应检查配网、校时、三张卡片、按键、真实比赛的 Live/Final 切换，以及数据源故障提示。编译成功不能代替这些物理测试。
+
+### 验证记录：2026-09-28
+
+- Build：PASS（ESP-IDF 5.5.3、ESP32-C3、8 MB；合并镜像及归档已校验）。
+- Host tests：PASS（冠军赛数据模型、HenrikDev 解析器、打包图片、仓库检查）。
+- Device tests：已验证项目 PASS：经授权在 COM7 仅刷应用、首次赛程获取、用户确认队标和三页切换，以及 90 秒串口观察期间未见崩溃。未写入 NVS，保留 Wi-Fi 和 API Key 存储。
+- Unverified：直播时的五秒回合刷新、地图切换、备用源直播回合分。随后已在 WSL 运行完整验证，见下方补充记录。
+- 应用 SHA-256：`5DD4EEC3AEA59EDE42F41C4DEEC52DAFD90208FB54602E311EDFDBE1C5EDB091`。
+- 合并镜像 SHA-256 / `build/firmware/` 下归档目录：`7741CBC5AE4BF005B8E117DE49B1CA3855B2E5A40AD3D6447F29B88FC6407BD2`。
+- 对应 ELF SHA-256：`8a25d60ceb3b474b42899505b5751336a062a8d24b2d3118f11d522a99624071`。
+
+### WSL 验证补充：2026-09-28
+
+- 环境：WSL2 中的 Ubuntu 26.04.1、Python 3.14.4、ESP-IDF v5.5.3。Linux 工具与验证副本独立于 Windows 原生环境；WSL 使用镜像网络和自动代理发现。
+- Build：PASS（`./tools/validate.sh`，包括独立配置构建、合并镜像校验及匹配的调试归档）。
+- Host tests：PASS（完整仓库验证，包括 actionlint 和全部主机测试）。
+- Device tests：此 Linux 镜像为 NOT RUN。上方 Windows 镜像的真机结果单独保留；本次补充验证未刷写设备。
+- Unverified：WSL 的 USB 转发、直播时的五秒回合刷新、地图切换、备用源直播回合分。
+- 验证源码快照及 `dependencies.lock` 与原工程一致。导出的 Linux 镜像位于 `build/wsl-validation/FoloToy-AI-Passport-full.bin`，已校验的配套归档位于 `build/firmware/c2e59268c9432bb2e91964b93f84a55c121015a8fc8424ffc29b416f1d6df1a8/`；Windows 原生构建保留。
+- 应用 SHA-256：`fd499cf2ad70c7d5c6d0dda28425a980b1379f56a0afd4567464e47487afc1ed`。
+- 合并镜像 SHA-256：`c2e59268c9432bb2e91964b93f84a55c121015a8fc8424ffc29b416f1d6df1a8`。
+- 对应 ELF SHA-256：`a80cdc892a092b522772a8052e38ee6e0918045a00ae88f42cd7cfd57b9d7533`。
+

@@ -10,6 +10,7 @@ This directory contains AI Passport engineering rules and reusable workflows, gr
 
 - [ai-guide.md](ai-guide.md): AI-assisted development workflow.
 - [Core AI skills](../../skills/README.md): development, setup, build, device testing, and diagnosis; installation and usage examples.
+- [Champions Shanghai card](champions-card.md): this derivative application's data source, controls, Wi-Fi setup, and device checks.
 
 ## Engineering
 
