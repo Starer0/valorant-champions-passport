@@ -115,6 +115,47 @@ static esp_err_t fetch_live_rounds(champions_match_t *match)
     return result;
 }
 
+static esp_err_t fetch_match_start(champions_match_t *match)
+{
+    char url[64];
+    snprintf(url, sizeof(url), "https://www.vlr.gg/%d/", match->id);
+    esp_http_client_handle_t client = open_get(url, NULL);
+    if (!client) return ESP_FAIL;
+    size_t used = 0, received = 0;
+    esp_err_t result = ESP_ERR_NOT_FOUND;
+    int count;
+    while (received < 65536 &&
+           (count = esp_http_client_read(client, s_match_buffer + used, 1024)) > 0) {
+        used += (size_t)count;
+        received += (size_t)count;
+        s_match_buffer[used] = '\0';
+        if (champions_parse_match_start(s_match_buffer, used, match)) {
+            result = ESP_OK;
+            break;
+        }
+        size_t keep = used < 64 ? used : 64;
+        memmove(s_match_buffer, s_match_buffer + used - keep, keep);
+        used = keep;
+    }
+    esp_http_client_cleanup(client);
+    return result;
+}
+
+static esp_err_t restore_missing_start_times(champions_snapshot_t *snapshot)
+{
+    int requests = 0;
+    for (size_t i = 0; i < snapshot->count; ++i) {
+        champions_match_t *match = &snapshot->matches[i];
+        if (match->start_utc > 0) continue;
+        if (++requests > 4) return ESP_ERR_INVALID_SIZE;
+        esp_err_t result = fetch_match_start(match);
+        if (result != ESP_OK) return result;
+        if (snapshot->has_recent_final && snapshot->recent_final.id == match->id)
+            snapshot->recent_final.start_utc = match->start_utc;
+    }
+    return ESP_OK;
+}
+
 static esp_err_t fetch_henrik_detail(champions_match_t *match)
 {
     char key[128];
@@ -172,6 +213,7 @@ esp_err_t champions_feed_refresh(champions_snapshot_t *snapshot)
     memset(updated, 0, sizeof(*updated));
     esp_err_t result = fetch_calendar(updated);
     if (result != ESP_OK) return result;
+    champions_keep_schedule(updated, snapshot, time(NULL));
     int64_t score_started = esp_timer_get_time();
     esp_err_t score_result = fetch_scores(updated);
     ESP_LOGI(TAG, "VLR match list: %s in %lld ms", esp_err_to_name(score_result),
@@ -185,6 +227,8 @@ esp_err_t champions_feed_refresh(champions_snapshot_t *snapshot)
         *snapshot = *updated;
         return ESP_OK;
     }
+    result = restore_missing_start_times(updated);
+    if (result != ESP_OK) return result;
     champions_keep_rounds(updated, snapshot);
     *snapshot = *updated;
     return ESP_OK;

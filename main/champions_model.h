@@ -36,6 +36,13 @@ typedef struct {
     bool has_recent_final;
 } champions_snapshot_t;
 
+typedef struct {
+    int page;
+    bool locked;
+    int64_t changed_at;
+    int64_t manual_until;
+} champions_pages_t;
+
 bool champions_parse_ics(const char *data, size_t length, champions_snapshot_t *out);
 bool champions_apply_match_html(const char *html, size_t length, champions_snapshot_t *snapshot);
 void champions_consume_html(char *buffer, size_t *used, champions_snapshot_t *snapshot);
@@ -46,4 +53,11 @@ int champions_schedule_delay(const champions_snapshot_t *snapshot, int64_t now_u
 void champions_keep_rounds(champions_snapshot_t *updated, const champions_snapshot_t *previous);
 int champions_retry_delay(int previous_seconds);
 int champions_team_index(const char *code);
+bool champions_parse_match_start(const char *html, size_t length, champions_match_t *match);
+void champions_keep_schedule(champions_snapshot_t *updated, const champions_snapshot_t *previous, int64_t now_utc);
+size_t champions_schedule_matches(const champions_snapshot_t *snapshot, int64_t now_utc,
+                                 int indices[2], int64_t *day_utc);
+void champions_pages_select(champions_pages_t *pages, int direction, int64_t now);
+void champions_pages_toggle_lock(champions_pages_t *pages, int64_t now);
+void champions_pages_tick(champions_pages_t *pages, int64_t now);
 

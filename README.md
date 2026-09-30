@@ -2,7 +2,7 @@
 
 # VALORANT Champions Pocket Card
 
-A black-and-gold VALORANT Champions Shanghai 2026 companion for FoloToy AI Passport. Browse the next match, today's schedule, and tournament stage. During live matches, large numbers show the current map's round score, while dots under each team mark track maps won: two dots for BO3 and three for BO5. Times use China Standard Time (UTC+8).
+A black-and-gold VALORANT Champions Shanghai 2026 companion for FoloToy AI Passport. Browse the next match, match-day schedule, and tournament stage. During live matches, large numbers show the current map's round score, while dots under each team mark track maps won: two dots for BO3 and three for BO5. Times use China Standard Time (UTC+8).
 
 This is an unofficial fan project based on [FoloToy AI Passport](https://gitee.com/FoloToy/ai-passport). Event and team trademarks belong to their owners.
 
@@ -10,7 +10,7 @@ This is an unofficial fan project based on [FoloToy AI Passport](https://gitee.c
 
 1. On first startup, the screen shows `WIFI SETUP`. Have an internet-connected 2.4 GHz Wi-Fi network ready.
 2. Join the displayed `Passport-VCT-*` hotspot on a phone or computer using the displayed password. Open `http://192.168.4.1`, enter the Wi-Fi name and password, and select **Connect**. The hotspot closes and the match card appears after successful connection.
-3. Use UP/DOWN to switch pages. Briefly press OK, the lowest button on the right, to refresh. Pages also rotate automatically.
+3. Use UP/DOWN to switch pages. Briefly press OK, the third function button from the top on the right, to pause or resume automatic rotation. `LOCK` appears while paused; scores continue updating and UP/DOWN still work. Double-click OK to refresh immediately.
 4. Hold OK until `WIFI SETUP` appears to change networks. Saved Wi-Fi reconnects after restart.
 5. Optionally save a HenrikDev API key in the same setup portal with **Save API key** to enable the backup source. No API key is required for the primary source.
 
@@ -34,9 +34,9 @@ Download the merged image from GitHub Releases and write it at `0x0` only with t
 
 ## Validation
 
-The complete ESP-IDF build and host-test gate passed on 2026-09-28. The Linux merged image has SHA-256 `c2e59268c9432bb2e91964b93f84a55c121015a8fc8424ffc29b416f1d6df1a8`.
+The complete ESP-IDF build and host-test gate passed on 2026-10-01. The merged image has SHA-256 `f6154755e45a53fd534c275a31b5cfd05c270b43c28e3accb195ed0f4161070d`. The device-tested release asset is `VALORANT-Champions-v1.1.0-full.bin`; use its accompanying checksums to identify this exact image.
 
-The earlier Windows image passed on-device schedule retrieval, team-mark display, and three-page navigation. The Linux release image has not been flashed. Live five-second polling, map transitions, and live backup round scores remain unverified. See the [validation record](docs/development/champions-card.md#build-and-device-acceptance).
+The matching application was flashed while preserving saved settings. The owner confirmed team marks, page lock/resume, and schedule display. Live five-second polling, map transitions, live backup round scores, completed-match restoration after reboot, and double/long button actions remain unverified for this revision. See the [validation record](docs/development/champions-card.md#build-and-device-acceptance).
 
 ## Project structure
 

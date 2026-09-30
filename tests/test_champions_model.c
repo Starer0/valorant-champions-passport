@@ -220,8 +220,104 @@ static void test_schedule_refresh_keeps_rounds_only_for_same_series_score(void)
     assert(!updated.matches[0].has_round_score);
 }
 
+static void test_completed_match_is_retained_after_calendar_removes_it(void)
+{
+    const char *html =
+        "<a class=\"wf-module-item match-item\" href=\"/753444/result\">"
+        "<div class=\"match-item-vs-team-name\"><div class=\"text-of\">100 Thieves</div></div>"
+        "<div class=\"match-item-vs-team-score\">2</div>"
+        "<div class=\"match-item-vs-team-name\"><div class=\"text-of\">T1</div></div>"
+        "<div class=\"match-item-vs-team-score\">1</div>"
+        "<div class=\"ml mod-completed\"><div class=\"ml-eta mod-completed\">4h 24m</div></div></a>";
+    champions_snapshot_t snapshot = {0};
+    assert(champions_apply_match_html(html, strlen(html), &snapshot));
+    assert(snapshot.count == 1);
+    assert(snapshot.matches[0].status == CHAMPIONS_FINISHED);
+    assert(snapshot.matches[0].score_a == 2 && snapshot.matches[0].score_b == 1);
+    assert(strcmp(snapshot.matches[0].team_a, "100T") == 0);
+    assert(strcmp(snapshot.matches[0].team_b, "T1") == 0);
+}
+
+static void test_schedule_keeps_today_results_and_selects_next_match_day(void)
+{
+    const int64_t now = 1790499600; /* Sep 27, 17:00 CST */
+    champions_snapshot_t snapshot = {.count = 4};
+    snapshot.matches[0] = (champions_match_t){.id = 10, .start_utc = now + 86400 * 3};
+    snapshot.matches[1] = (champions_match_t){.id = 11, .start_utc = now - 3600,
+        .status = CHAMPIONS_FINISHED, .score_a = 2, .score_b = 1};
+    snapshot.matches[2] = (champions_match_t){.id = 12, .start_utc = now + 7200};
+    snapshot.matches[3] = (champions_match_t){.id = 13, .start_utc = now + 86400 * 2};
+    int indices[2];
+    int64_t day;
+    assert(champions_schedule_matches(&snapshot, now, indices, &day) == 2);
+    assert(indices[0] == 1 && indices[1] == 2);
+    assert(day == 1790438400); /* Sep 27, 00:00 CST */
+    /* Sep 28 is a rest day: display Sep 29, not the later Sep 30 row. */
+    assert(champions_schedule_matches(&snapshot, now + 86400, indices, &day) == 1);
+    assert(indices[0] == 3);
+    assert(day == 1790611200);
+    snapshot.count = 0;
+    assert(champions_schedule_matches(&snapshot, now, indices, &day) == 0);
+}
+
+static void test_today_results_survive_next_calendar_refresh_without_duplicates(void)
+{
+    const int64_t now = 1790499600;
+    champions_snapshot_t previous = {.count = 2}, updated = {.count = 1};
+    previous.matches[0] = (champions_match_t){.id = 1, .start_utc = now - 3600,
+        .status = CHAMPIONS_FINISHED, .score_a = 2, .score_b = 1};
+    previous.matches[1] = (champions_match_t){.id = 2, .start_utc = now + 7200};
+    updated.matches[0] = previous.matches[1];
+    champions_keep_schedule(&updated, &previous, now);
+    assert(updated.count == 2);
+    assert(updated.matches[1].id == 1 && updated.matches[1].score_a == 2);
+    champions_keep_schedule(&updated, &previous, now);
+    assert(updated.count == 2);
+}
+
+static void test_completed_start_uses_exact_utc_not_relative_result_age(void)
+{
+    champions_match_t match = {0};
+    const char *html = "<div class=\"moment-tz-convert\" data-utc-ts=\"2026-09-27 09:00:00\">";
+    assert(champions_parse_match_start(html, strlen(html), &match));
+    assert(match.start_utc == 1790499600);
+    const char *partial = "data-utc-ts=\"2026-09-27 09:";
+    assert(!champions_parse_match_start(partial, strlen(partial), &match));
+    assert(match.start_utc == 1790499600);
+}
+
+static void test_page_lock_freezes_rotation_but_allows_navigation(void)
+{
+    champions_pages_t pages = {.page = 1, .changed_at = 10};
+    champions_pages_toggle_lock(&pages, 12);
+    champions_pages_tick(&pages, 1000);
+    assert(pages.page == 1);
+    champions_pages_select(&pages, 1, 1001);
+    champions_pages_tick(&pages, 2000);
+    assert(pages.page == 2 && pages.locked);
+    champions_pages_toggle_lock(&pages, 2000);
+    champions_pages_tick(&pages, 2000);
+    assert(pages.page == 2 && !pages.locked);
+    champions_pages_tick(&pages, 2004);
+    assert(pages.page == 0);
+    champions_pages_tick(&pages, 2011);
+    assert(pages.page == 0);
+    champions_pages_tick(&pages, 2012);
+    assert(pages.page == 1);
+    champions_pages_select(&pages, -1, 2020);
+    champions_pages_tick(&pages, 2039);
+    assert(pages.page == 0);
+    champions_pages_tick(&pages, 2040);
+    assert(pages.page == 1);
+}
+
 int main(void)
 {
+    test_schedule_keeps_today_results_and_selects_next_match_day();
+    test_today_results_survive_next_calendar_refresh_without_duplicates();
+    test_completed_start_uses_exact_utc_not_relative_result_age();
+    test_page_lock_freezes_rotation_but_allows_navigation();
+    test_completed_match_is_retained_after_calendar_removes_it();
     test_calendar_uses_utc_and_folds_lines();
     test_live_score_extracts_only_selected_match();
     test_home_prioritizes_live_then_next();

@@ -142,6 +142,29 @@ bool champions_parse_ics(const char *data, size_t length, champions_snapshot_t *
     return saw_calendar_begin && saw_calendar_end;
 }
 
+static int completed_age_seconds(const char *html)
+{
+    const char *eta = strstr(html, "ml-eta mod-completed");
+    if (!eta || !(eta = strchr(eta, '>'))) return -1;
+    ++eta;
+    int seconds = 0;
+    bool found = false;
+    while (*eta && *eta != '<') {
+        while (isspace((unsigned char)*eta)) ++eta;
+        if (!isdigit((unsigned char)*eta)) break;
+        char *end;
+        long value = strtol(eta, &end, 10);
+        int scale = *end == 's' ? 1 : *end == 'm' ? 60 :
+                    *end == 'h' ? 3600 : *end == 'd' ? 86400 : 0;
+        if (!scale || value > 86400 / scale) return -1;
+        seconds += (int)value * scale;
+        if (seconds > 86400) return -1;
+        found = true;
+        eta = end + 1;
+    }
+    return found ? seconds : -1;
+}
+
 bool champions_apply_match_html(const char *html, size_t length, champions_snapshot_t *snapshot)
 {
     if (!html || !snapshot || length == 0) return false;
@@ -155,39 +178,34 @@ bool champions_apply_match_html(const char *html, size_t length, champions_snaps
             break;
         }
     }
-    if (!match && strstr(html, "ml mod-completed")) {
-        const char *eta = strstr(html, "ml-eta mod-completed");
-        if (eta && (eta = strchr(eta, '>')) != NULL) {
-            ++eta;
-            while (*eta && isspace((unsigned char)*eta)) ++eta;
-            int age = atoi(eta);
-            while (isdigit((unsigned char)*eta)) ++eta;
-            if (*eta == 'm' && age <= 10) {
-                match = &snapshot->recent_final;
-                *match = (champions_match_t){.id = id};
-                snapshot->has_recent_final = true;
-                const char *name = html;
-                for (int team_index = 0; team_index < 2; ++team_index) {
-                    name = strstr(name, "match-item-vs-team-name");
-                    if (!name) break;
-                    name = strstr(name, "class=\"text-of\"");
-                    if (!name || (name = strchr(name, '>')) == NULL) break;
-                    ++name;
-                    char full[64] = {0};
-                    size_t used = 0;
-                    bool in_tag = false;
-                    while (*name && strncmp(name, "</div>", 6) != 0 && used < sizeof(full) - 1) {
-                        if (*name == '<') in_tag = true;
-                        else if (*name == '>') in_tag = false;
-                        else if (!in_tag) full[used++] = *name;
-                        ++name;
-                    }
-                    while (used && isspace((unsigned char)full[used - 1])) full[--used] = '\0';
-                    char *trimmed = full;
-                    while (*trimmed && isspace((unsigned char)*trimmed)) ++trimmed;
-                    short_team(trimmed, team_index == 0 ? match->team_a : match->team_b);
-                }
+    champions_match_t candidate = {.id = id};
+    bool created = false;
+    int completed_age = completed_age_seconds(html);
+    if (!match && id > 0 && snapshot->count < CHAMPIONS_MAX_MATCHES &&
+        (strstr(html, "ml mod-live") ||
+         (strstr(html, "ml mod-completed") && completed_age >= 0))) {
+        match = &candidate;
+        created = true;
+        const char *name = html;
+        for (int team_index = 0; team_index < 2; ++team_index) {
+            name = strstr(name, "match-item-vs-team-name");
+            if (!name) break;
+            name = strstr(name, "class=\"text-of\"");
+            if (!name || (name = strchr(name, '>')) == NULL) break;
+            ++name;
+            char full[64] = {0};
+            size_t used = 0;
+            bool in_tag = false;
+            while (*name && strncmp(name, "</div>", 6) != 0 && used < sizeof(full) - 1) {
+                if (*name == '<') in_tag = true;
+                else if (*name == '>') in_tag = false;
+                else if (!in_tag) full[used++] = *name;
+                ++name;
             }
+            while (used && isspace((unsigned char)full[used - 1])) full[--used] = '\0';
+            char *trimmed = full;
+            while (*trimmed && isspace((unsigned char)*trimmed)) ++trimmed;
+            short_team(trimmed, team_index == 0 ? match->team_a : match->team_b);
         }
     }
     if (match) {
@@ -208,6 +226,8 @@ bool champions_apply_match_html(const char *html, size_t length, champions_snaps
             match->score_a = values[0];
             match->score_b = values[1];
         }
+        if (created && (!match->team_a[0] || !match->team_b[0] ||
+                        (match->status == CHAMPIONS_FINISHED && found != 2))) return false;
         const char *stage = strstr(html, "match-item-event-series text-of");
         if (stage && (stage = strchr(stage, '>')) != NULL) {
             ++stage;
@@ -221,6 +241,11 @@ bool champions_apply_match_html(const char *html, size_t length, champions_snaps
                     match->stage[n] = '\0';
                 }
             }
+        }
+        if (created) snapshot->matches[snapshot->count++] = *match;
+        if (match->status == CHAMPIONS_FINISHED && completed_age >= 0 && completed_age <= 600) {
+            snapshot->recent_final = *match;
+            snapshot->has_recent_final = true;
         }
         return true;
     }
@@ -381,4 +406,94 @@ int champions_retry_delay(int previous_seconds)
     if (previous_seconds < 15) return 15;
     if (previous_seconds >= 120) return 120;
     return previous_seconds * 2;
+}
+
+bool champions_parse_match_start(const char *html, size_t length, champions_match_t *match)
+{
+    if (!html || !match) return false;
+    const char *stamp = strstr(html, "data-utc-ts=\"");
+    if (!stamp) return false;
+    stamp += strlen("data-utc-ts=\"");
+    if ((size_t)(stamp - html) + 20 > length || stamp[19] != '"') return false;
+    int year, month, day, hour, minute, second;
+    if (sscanf(stamp, "%4d-%2d-%2d %2d:%2d:%2d", &year, &month, &day,
+               &hour, &minute, &second) != 6 || year < 2020 || year > 2100 ||
+        month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 ||
+        minute < 0 || minute > 59 || second < 0 || second > 59) return false;
+    match->start_utc = days_from_civil(year, (unsigned)month, (unsigned)day) * 86400 +
+                       hour * 3600 + minute * 60 + second;
+    return true;
+}
+
+void champions_keep_schedule(champions_snapshot_t *updated, const champions_snapshot_t *previous,
+                             int64_t now_utc)
+{
+    if (!updated || !previous || now_utc <= 1700000000) return;
+    int64_t today = (now_utc + 8 * 3600) / 86400;
+    for (size_t i = 0; i < previous->count; ++i) {
+        const champions_match_t *old = &previous->matches[i];
+        int64_t day = (old->start_utc + 8 * 3600) / 86400;
+        if (old->start_utc <= 0 || day < today - 1 || day > today) continue;
+        bool exists = false;
+        for (size_t j = 0; j < updated->count; ++j) {
+            if (updated->matches[j].id == old->id) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists && updated->count < CHAMPIONS_MAX_MATCHES)
+            updated->matches[updated->count++] = *old;
+    }
+}
+
+size_t champions_schedule_matches(const champions_snapshot_t *snapshot, int64_t now_utc,
+                                 int indices[2], int64_t *day_utc)
+{
+    *day_utc = 0;
+    if (!snapshot) return 0;
+    bool clock_valid = now_utc > 1700000000;
+    int64_t today = clock_valid ? (now_utc + 8 * 3600) / 86400 : 0;
+    int64_t selected_day = INT64_MAX;
+    for (size_t i = 0; i < snapshot->count; ++i) {
+        const champions_match_t *match = &snapshot->matches[i];
+        if (match->start_utc <= 0 || (!clock_valid && match->status == CHAMPIONS_FINISHED)) continue;
+        int64_t day = (match->start_utc + 8 * 3600) / 86400;
+        if (day >= today && day < selected_day) selected_day = day;
+    }
+    if (selected_day == INT64_MAX) return 0;
+    size_t count = 0;
+    for (size_t i = 0; i < snapshot->count; ++i) {
+        const champions_match_t *match = &snapshot->matches[i];
+        if (match->start_utc <= 0 || (match->start_utc + 8 * 3600) / 86400 != selected_day) continue;
+        if (!count || match->start_utc < snapshot->matches[indices[0]].start_utc) {
+            if (count) indices[1] = indices[0];
+            indices[0] = (int)i;
+        } else if (count < 2 || match->start_utc < snapshot->matches[indices[1]].start_utc)
+            indices[1] = (int)i;
+        if (count < 2) ++count;
+    }
+    *day_utc = selected_day * 86400 - 8 * 3600;
+    return count;
+}
+
+void champions_pages_select(champions_pages_t *pages, int direction, int64_t now)
+{
+    pages->page = (pages->page + (direction < 0 ? 2 : 1)) % 3;
+    pages->changed_at = now;
+    pages->manual_until = now + 20;
+}
+
+void champions_pages_toggle_lock(champions_pages_t *pages, int64_t now)
+{
+    pages->locked = !pages->locked;
+    pages->changed_at = now;
+    pages->manual_until = now;
+}
+
+void champions_pages_tick(champions_pages_t *pages, int64_t now)
+{
+    if (pages->locked || now < pages->manual_until ||
+        now - pages->changed_at < (pages->page == 0 ? 8 : 4)) return;
+    pages->page = (pages->page + 1) % 3;
+    pages->changed_at = now;
 }

@@ -32,8 +32,7 @@ static lv_obj_t *s_brand, *s_stage_mark, *s_tile_a, *s_tile_b;
 static lv_obj_t *s_logo_a, *s_logo_b, *s_team_a, *s_team_b;
 static lv_obj_t *s_win_dot[2][3];
 static lv_obj_t *s_today_logo[2][2], *s_today_match[2], *s_today_time[2];
-static int s_page;
-static int64_t s_page_at, s_manual_until;
+static champions_pages_t s_pages;
 typedef struct { bsp_btn_t button; bsp_btn_ev_t event; } app_key_event_t;
 
 static int64_t uptime(void) { return esp_timer_get_time() / 1000000; }
@@ -102,6 +101,12 @@ static void show_logo(lv_obj_t *obj, int team_index, bool small)
 {
     const lv_image_dsc_t *src = champions_assets_logo(team_index, small);
     if (src) {
+        if (small) {
+            lv_obj_set_style_bg_color(obj, lv_color_hex(champions_assets_light_background(team_index) ?
+                                     0xC9B997 : 0x17171D), 0);
+            lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(obj, 3, 0);
+        }
         lv_image_set_src(obj, src);
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
     } else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
@@ -239,6 +244,12 @@ static void render_home(const champions_snapshot_t *data, int64_t now)
     lv_obj_remove_flag(s_team_b, LV_OBJ_FLAG_HIDDEN);
     show_logo(s_logo_a, champions_team_index(match->team_a), false);
     show_logo(s_logo_b, champions_team_index(match->team_b), false);
+    lv_obj_set_style_bg_color(s_tile_a,
+        lv_color_hex(champions_assets_light_background(champions_team_index(match->team_a)) ?
+                     0xC9B997 : 0x17171D), 0);
+    lv_obj_set_style_bg_color(s_tile_b,
+        lv_color_hex(champions_assets_light_background(champions_team_index(match->team_b)) ?
+                     0xC9B997 : 0x17171D), 0);
     lv_label_set_text(s_team_a, match->team_a);
     lv_label_set_text(s_team_b, match->team_b);
     lv_label_set_text(s_match, "VS");
@@ -284,43 +295,48 @@ static void render_home(const champions_snapshot_t *data, int64_t now)
     lv_label_set_text(s_info, match->stage[0] ? match->stage : "CHAMPIONS SHANGHAI");
 }
 
-static void render_today(const champions_snapshot_t *data, int64_t now)
+static void render_schedule(const champions_snapshot_t *data, int64_t now)
 {
     lv_obj_set_style_text_color(s_title, lv_color_hex(MUTED), 0);
     lv_obj_set_style_text_font(s_match, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_match, lv_color_hex(CREAM), 0);
     lv_obj_set_pos(s_match, 16, 102);
     lv_obj_add_flag(s_detail, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(s_title, "TODAY");
-    time_t shifted = (time_t)(now + 8 * 3600);
+    lv_label_set_text(s_title, "SCHEDULE");
+    int indices[2];
+    int64_t day_utc;
+    size_t count = champions_schedule_matches(data, now, indices, &day_utc);
+    time_t shifted = (time_t)((count ? day_utc : now) + 8 * 3600);
     struct tm date;
     gmtime_r(&shifted, &date);
     char line[64];
     snprintf(line, sizeof(line), "%02d/%02d", date.tm_mon + 1, date.tm_mday);
-    lv_label_set_text(s_match, valid_clock(now) ? line : "--/--");
-    int count = 0;
-    int64_t today = (now + 8 * 3600) / 86400;
-    for (size_t i = 0; i < data->count && count < 2; ++i) {
-        const champions_match_t *m = &data->matches[i];
-        if (valid_clock(now) && (m->start_utc + 8 * 3600) / 86400 != today) continue;
+    lv_label_set_text(s_match, count || valid_clock(now) ? line : "--/--");
+    for (size_t row = 0; row < count; ++row) {
+        const champions_match_t *m = &data->matches[indices[row]];
         char start[16];
         local_time(m->start_utc, start);
-        show_logo(s_today_logo[count][0], champions_team_index(m->team_a), true);
-        show_logo(s_today_logo[count][1], champions_team_index(m->team_b), true);
-        lv_obj_remove_flag(s_today_match[count], LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(s_today_time[count], LV_OBJ_FLAG_HIDDEN);
+        show_logo(s_today_logo[row][0], champions_team_index(m->team_a), true);
+        show_logo(s_today_logo[row][1], champions_team_index(m->team_b), true);
+        lv_obj_remove_flag(s_today_match[row], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_today_time[row], LV_OBJ_FLAG_HIDDEN);
         snprintf(line, sizeof(line), "%s  VS  %s", m->team_a, m->team_b);
-        lv_label_set_text(s_today_match[count], line);
-        snprintf(line, sizeof(line), "%s  CST", start);
-        lv_label_set_text(s_today_time[count], line);
-        ++count;
+        lv_label_set_text(s_today_match[row], line);
+        if (m->status == CHAMPIONS_FINISHED)
+            snprintf(line, sizeof(line), "FINAL  %d : %d", m->score_a, m->score_b);
+        else if (m->status == CHAMPIONS_LIVE)
+            snprintf(line, sizeof(line), "LIVE  %d : %d", m->score_a, m->score_b);
+        else snprintf(line, sizeof(line), "%s  CST", start);
+        lv_obj_set_style_text_color(s_today_time[row],
+            lv_color_hex(m->status == CHAMPIONS_LIVE ? RED : GOLD), 0);
+        lv_label_set_text(s_today_time[row], line);
     }
     if (count) lv_obj_add_flag(s_number, LV_OBJ_FLAG_HIDDEN);
     else {
         lv_obj_set_style_text_font(s_number, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_color(s_number, lv_color_hex(CREAM), 0);
         lv_obj_set_pos(s_number, 16, 183);
-        lv_label_set_text(s_number, "NO MATCH TODAY");
+        lv_label_set_text(s_number, "NO UPCOMING MATCH");
     }
     lv_obj_set_pos(s_info, 16, 278);
     lv_label_set_text(s_info, "CHINA TIME  UTC+8");
@@ -382,11 +398,11 @@ static void render(const champions_snapshot_t *data, int64_t now, int battery)
         lv_label_set_text(s_battery, text);
     } else lv_label_set_text(s_battery, "");
     if (passport_net_state() == PASSPORT_NET_SETUP) render_setup();
-    else if (s_page == 1) render_today(data, now);
-    else if (s_page == 2) render_stage(now);
+    else if (s_pages.page == 1) render_schedule(data, now);
+    else if (s_pages.page == 2) render_stage(now);
     else render_home(data, now);
     const char *dots[] = {"O . .", ". O .", ". . O"};
-    snprintf(text, sizeof(text), "%s%s%s", dots[s_page],
+    snprintf(text, sizeof(text), "%s%s%s", s_pages.locked ? "LOCK" : dots[s_pages.page],
              !passport_net_online() ? "  OFFLINE" : (s_error ? "  DATA ERROR" : ""),
              s_updated && valid_clock(now) && now - s_updated > 1800 ? "  STALE" : "");
     lv_label_set_text(s_footer, text);
@@ -487,25 +503,22 @@ void app_main(void)
         if (xTaskCreate(network_task, "vct_network", 8192, NULL, 4, NULL) != pdPASS)
             ESP_LOGE(TAG, "Network task creation failed");
     } else ESP_LOGE(TAG, "Network initialization failed");
-    s_page_at = uptime();
+    s_pages.changed_at = uptime();
     int battery = -1;
     int64_t battery_at = 0;
     for (;;) {
         app_key_event_t key;
         while (xQueueReceive(s_keys, &key, 0) == pdTRUE) {
             if (key.event == BSP_BTN_LONG && key.button == BSP_BTN_OK) passport_net_request_setup();
-            else if (key.event == BSP_BTN_CLICK && key.button == BSP_BTN_OK) s_refresh = true;
+            else if (key.event == BSP_BTN_CLICK && key.button == BSP_BTN_OK)
+                champions_pages_toggle_lock(&s_pages, uptime());
+            else if (key.event == BSP_BTN_DOUBLE && key.button == BSP_BTN_OK) s_refresh = true;
             else if (key.event == BSP_BTN_CLICK && (key.button == BSP_BTN_UP || key.button == BSP_BTN_DOWN)) {
-                s_page = (s_page + (key.button == BSP_BTN_UP ? 2 : 1)) % 3;
-                s_page_at = uptime();
-                s_manual_until = s_page_at + 20;
+                champions_pages_select(&s_pages, key.button == BSP_BTN_UP ? -1 : 1, uptime());
             }
         }
         int64_t now = uptime();
-        if (now >= s_manual_until && now - s_page_at >= (s_page == 0 ? 8 : 4)) {
-            s_page = (s_page + 1) % 3;
-            s_page_at = now;
-        }
+        champions_pages_tick(&s_pages, now);
         if (has_battery && now - battery_at >= 60) {
             battery = bsp_battery_soc();
             battery_at = now;

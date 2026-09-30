@@ -60,15 +60,8 @@ def fit_logo(image: Image.Image, size: int) -> Image.Image:
     image.thumbnail((size - 4, size - 4), Image.Resampling.LANCZOS)
     output = Image.new("RGBA", (size, size))
     output.alpha_composite(image, ((size - image.width) // 2, (size - image.height) // 2))
-    pixels = output.load()
-    for y in range(size):
-        for x in range(size):
-            r, g, b, a = pixels[x, y]
-            luminance = (299 * r + 587 * g + 114 * b) // 1000
-            # Make black/navy marks legible on the near-black card while keeping
-            # recognizable saturated team colours, such as T1 red.
-            if a and luminance < 80 and max(r, g, b) - min(r, g, b) < 100:
-                pixels[x, y] = (242, 232, 213, a)
+    # Preserve the official colours and outlines. Contrast is provided by the
+    # application's tile background, never by changing the team's artwork.
     return output
 
 

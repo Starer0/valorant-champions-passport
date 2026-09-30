@@ -28,6 +28,18 @@ def main() -> None:
     offset = check_image(blob, offset, 70)
     offset = check_image(blob, offset, 28)
     assert offset == len(blob) == 170076
+    # Dark outlines and navy fill must survive packing; whitening them makes
+    # TYLOO and Liquid lose their original detail on the device.
+    step = (52 * 52 + 22 * 22) * 3
+    for team_index, code in ((12, "TL"), (13, "TYL")):
+        start = team_index * step
+        dark = 0
+        for i in range(52 * 52):
+            pixel = int.from_bytes(blob[start + i * 2:start + i * 2 + 2], "little")
+            r, g, b = (pixel >> 11) * 255 // 31, ((pixel >> 5) & 63) * 255 // 63, (pixel & 31) * 255 // 31
+            if blob[start + 52 * 52 * 2 + i] > 220 and max(r, g, b) < 65:
+                dark += 1
+        assert dark > 100, f"{code} dark colour/detail was lost: {dark} pixels"
     print("champions assets: PASS")
 
 
